@@ -1,0 +1,115 @@
+import pandas as pd
+import folium
+from folium.plugins import MarkerCluster
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# 1. LOAD AND CLEAN THE DATASET
+try:
+    df = pd.read_csv('society_dogs_data.csv')
+    print("✨ Success! Loaded your custom society dog data.")
+except FileNotFoundError:
+    print("❌ Error: Could not find 'society_dogs_data.csv'.")
+    exit()
+
+# Clean empty spaces from string columns
+for col in ['Human_Aggressive', 'Limping', 'Ticks', 'Lane', 'Dog_ID']:
+    if col in df.columns:
+        df[col] = df[col].astype(str).str.strip()
+
+# Fill missing coordinates with lane averages so they still render nicely
+df['Latitude'] = df['Latitude'].fillna(df.groupby('Lane')['Latitude'].transform('mean'))
+df['Longitude'] = df['Longitude'].fillna(df.groupby('Lane')['Longitude'].transform('mean'))
+
+# Final fallback coordinates if everything else is blank
+df['Latitude'] = df['Latitude'].fillna(18.519315)
+df['Longitude'] = df['Longitude'].fillna(73.984537)
+
+# Helper function to categorize aggression string values
+def calculate_aggression(val):
+    val = val.lower()
+    if 'yes' in val or 'aggressive' in val:
+        return 1
+    return 0
+
+# Helper function to categorize physical ailments
+def check_issue(val):
+    val = val.lower()
+    if 'yes' in val or 'minor' in val:
+        return 1
+    return 0
+
+df['Aggressive_Count'] = df['Human_Aggressive'].apply(calculate_aggression)
+df['Tick_Count'] = df['Ticks'].apply(check_issue)
+df['Limp_Count'] = df['Limping'].apply(check_issue)
+
+sns.set_theme(style="darkgrid")
+
+# ==========================================
+# PART 1: GENERATE INTERACTIVE GPS MAP
+# ==========================================
+print("🗺️ Generating your society GIS map...")
+society_map = folium.Map(location=[18.519315, 73.984537], zoom_start=19)
+marker_cluster = MarkerCluster().add_to(society_map)
+
+for index, row in df.iterrows():
+    if row['Aggressive_Count'] == 1:
+        pin_color = 'red'
+    elif row['Limp_Count'] == 1 or row['Tick_Count'] == 1:
+        pin_color = 'orange'
+    else:
+        pin_color = 'green'
+        
+    popup_text = f"""
+    <div style='font-family: Arial, sans-serif; width: 220px;'>
+        <h4>🐾 <b>ID: {row['Dog_ID']}</b></h4>
+        <b>Lane Location:</b> {row['Lane']}<br>
+        <b>Gender:</b> {row['Gender']}<br>
+        <b>Neutered (Ear Cut):</b> {row['Ear_Cut']}<br>
+        <b>Ticks:</b> {row['Ticks']} | <b>Limp:</b> {row['Limping']}<br>
+        <b>Behavior:</b> {row['Human_Aggressive']}<br>
+        <b>Seen At:</b> {row['Time_Seen']}
+    </div>
+    """
+    
+    folium.Marker(
+        location=[row['Latitude'], row['Longitude']],
+        popup=folium.Popup(popup_text, max_width=250),
+        tooltip=f"Click to see {row['Dog_ID']}",
+        icon=folium.Icon(color=pin_color, icon='info-sign')
+    ).add_to(marker_cluster)
+
+society_map.save('index.html')
+print("✅ Saved interactive map as 'index.html'")
+
+# ==========================================
+# PART 2: POPULATION DENSITY GRAPH
+# ==========================================
+print("📊 Generating density charts...")
+plt.figure(figsize=(9, 5))
+lane_counts = df['Lane'].value_counts()
+sns.barplot(x=lane_counts.index, y=lane_counts.values, palette="crest")
+plt.title('Dog Population Observations Across Society Lanes', fontsize=14, fontweight='bold')
+plt.xlabel('Lane / Location')
+plt.ylabel('Total Observations Captured')
+plt.tight_layout()
+plt.savefig('lane_population_density.png')
+plt.close()
+
+# ==========================================
+# PART 3: HEALTH & SAFETY DASHBOARD
+# ==========================================
+print("🏥 Generating health summary charts...")
+health_summary = df.groupby('Lane')[['Tick_Count', 'Limp_Count', 'Aggressive_Count']].sum()
+
+plt.figure(figsize=(10, 6))
+health_summary.plot(kind='bar', stacked=False, color=['#e67e22', '#e74c3c', '#9b59b6'], figsize=(10,6))
+plt.title('Society Stray Care & Safety Dashboard by Lane', fontsize=14, fontweight='bold')
+plt.xlabel('Lane / Location')
+plt.ylabel('Total Incidents Recorded')
+plt.legend(['Ticks Present', 'Injured / Limping', 'Aggressive (Bikes/Stones)'])
+plt.tight_layout()
+plt.savefig('society_health_and_safety.png')
+plt.close()
+
+print("🎉 Complete! Files are ready for GitHub upload.")
