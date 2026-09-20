@@ -1,0 +1,109 @@
+import pandas as pd
+import folium
+from folium.plugins import MarkerCluster
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+
+# -------------------------------------------------
+# 1. LOAD THE DATASET
+# -------------------------------------------------
+csv_path = 'society_dogs_data.csv'
+
+if not os.path.exists(csv_path):
+    raise FileNotFoundError(
+        f"❌ File not found: '{csv_path}'\n"
+        "Please make sure the CSV is in the same folder as this script."
+    )
+
+df = pd.read_csv(csv_path)
+
+# Clean empty trailing spaces from text fields safely
+text_cols = ['Human_Aggressive', 'Limping', 'Ticks', 'Lane', 'Dog_ID']
+for col in text_cols:
+    if col in df.columns:
+        df[col] = df[col].astype(str).str.strip()
+
+# Apply absolute fixed global coordinate fallbacks
+df['Latitude']  = pd.to_numeric(df.get('Latitude'),  errors='coerce').fillna(18.519315)
+df['Longitude'] = pd.to_numeric(df.get('Longitude'), errors='coerce').fillna(73.984537)
+
+# Handle behavioral mappings safely
+def is_yes_or_aggressive(val):
+    val = str(val).lower()
+    return 1 if ('yes' in val or 'aggressive' in val) else 0
+
+def is_yes_or_minor(val):
+    val = str(val).lower()
+    return 1 if ('yes' in val or 'minor' in val) else 0
+
+df['Aggressive_Count'] = df['Human_Aggressive'].apply(is_yes_or_aggressive) if 'Human_Aggressive' in df.columns else 0
+df['Tick_Count']       = df['Ticks'].apply(is_yes_or_minor) if 'Ticks' in df.columns else 0
+df['Limp_Count']       = df['Limping'].apply(is_yes_or_minor) if 'Limping' in df.columns else 0
+
+sns.set_theme(style="darkgrid")
+
+# -------------------------------------------------
+# PART 1: GENERATE INTERACTIVE GPS MAP
+# -------------------------------------------------
+society_map = folium.Map(location=[18.519315, 73.984537], zoom_start=19)
+marker_cluster = MarkerCluster().add_to(society_map)
+
+for _, row in df.iterrows():
+    if row['Aggressive_Count'] == 1:
+        pin_color = 'red'
+    elif row['Limp_Count'] == 1 or row['Tick_Count'] == 1:
+        pin_color = 'orange'
+    else:
+        pin_color = 'green'
+
+    popup_text = (
+        f"<b>ID: {row.get('Dog_ID', 'N/A')}</b><br>"
+        f"Lane: {row.get('Lane', 'N/A')}<br>"
+        f"Behavior: {row.get('Human_Aggressive', 'N/A')}"
+    )
+
+    folium.Marker(
+        location=[row['Latitude'], row['Longitude']],
+        popup=folium.Popup(popup_text, max_width=250),
+        icon=folium.Icon(color=pin_color)
+    ).add_to(marker_cluster)
+
+society_map.save('index.html')
+print("✅ Map saved → index.html")
+
+# -------------------------------------------------
+# PART 2: POPULATION DENSITY GRAPH
+# -------------------------------------------------
+if 'Lane' in df.columns:
+    plt.figure(figsize=(9, 5))
+    lane_counts = df['Lane'].value_counts()
+    sns.barplot(x=lane_counts.index, y=lane_counts.values, palette="crest")
+    plt.title('Dog Population Observations Across Society Lanes', fontsize=12, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig('lane_population_density.png', dpi=150)
+    plt.close()
+    print("✅ Lane population chart saved → lane_population_density.png")
+else:
+    print("⚠️ Column 'Lane' not found – skipping population density graph")
+
+# -------------------------------------------------
+# PART 3: HEALTH & SAFETY DASHBOARD
+# -------------------------------------------------
+if 'Lane' in df.columns:
+    health_summary = df.groupby('Lane')[['Tick_Count', 'Limp_Count', 'Aggressive_Count']].sum()
+    health_summary.plot(
+        kind='bar',
+        stacked=False,
+        color=['#e67e22', '#e74c3c', '#9b59b6'],
+        figsize=(10, 6)
+    )
+    plt.title('Society Stray Care & Safety Dashboard by Lane', fontsize=12, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig('society_health_and_safety.png', dpi=150)
+    plt.close()
+    print("✅ Health & safety dashboard saved → society_health_and_safety.png")
+else:
+    print("⚠️ Column 'Lane' not found – skipping health dashboard")
+
+print("\n🎉 All available files generated successfully!")
